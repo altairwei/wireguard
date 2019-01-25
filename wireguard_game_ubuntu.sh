@@ -26,6 +26,7 @@ wireguard_install(){
     sudo add-apt-repository -y ppa:wireguard/wireguard
     sudo apt-get update -y
     sudo apt-get install -y wireguard curl
+    sudo apt-get install -y qrencode
 
     sudo echo net.ipv4.ip_forward = 1 >> /etc/sysctl.conf
     sysctl -p
@@ -198,6 +199,40 @@ EOF
     rm -f temprikey tempubkey
 }
 
+add_normal_user(){
+    cd /etc/wireguard/client
+    # 检查新用户名
+    echo -e "\033[37;41m给新用户起个名字，不能和已有用户重复，输入 'q' 退出\033[0m"
+    while [ -z $newname ] ; do
+        read -p "请输入用户名：" newname
+        if [ $newname = "q" ] ; then
+            return 0
+        fi
+        if [ -f $newname.conf ] ; then
+            echo -e "\033[37;41m用户名已存在!\033[0m"
+            newname=""
+        fi
+    done
+    # 生成配置文件
+    cp client_noudp.conf $newname.conf
+    wg genkey | tee temprikey | wg pubkey > tempubkey
+    ipnum=$(grep Allowed /etc/wireguard/wg0.conf | tail -1 | awk -F '[ ./]' '{print $6}')
+    newnum=$((10#${ipnum}+1))
+    sed -i 's%^PrivateKey.*$%'"PrivateKey = $(cat temprikey)"'%' $newname.conf
+    sed -i 's%^Address.*$%'"Address = 10.0.0.$newnum\/24"'%' $newname.conf
+
+cat >> /etc/wireguard/wg0.conf <<-EOF
+
+[Peer]
+PublicKey = $(cat tempubkey)
+AllowedIPs = 10.0.0.$newnum/32
+EOF
+    wg set wg0 peer $(cat tempubkey) allowed-ips 10.0.0.$newnum/32
+    echo -e "\033[37;41m添加完成，文件：/etc/wireguard/client/$newname.conf\033[0m"
+    cat $newname.conf | qrencode -o - -t UTF8
+    rm -f temprikey tempubkey
+}
+
 #开始菜单
 start_menu(){
     clear
@@ -211,7 +246,8 @@ start_menu(){
     echo
     echo -e "\033[0;33m 1. 安装wireguard+udpspeeder+udp2raw\033[0m"
     echo -e "\033[0;31m 2. 删除wireguard+udpspeeder+udp2raw\033[0m"
-    echo -e "\033[37;41m 3. 增加用户\033[0m"
+    echo -e "\033[37;41m 3. 增加UDP加速用户\033[0m"
+    echo -e "\033[37;41m 4. 增加普通用户\033[0m"
     echo -e " 0. 退出脚本"
     echo
     read -p "请输入数字:" num
@@ -224,6 +260,9 @@ start_menu(){
     ;;
     3)
     add_user
+    ;;
+    4)
+    add_normal_user
     ;;
     0)
     exit 1
